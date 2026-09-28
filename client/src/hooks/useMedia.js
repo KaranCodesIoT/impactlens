@@ -25,6 +25,11 @@ export function useMedia(projectId) {
   }, [fetchMedia]);
 
   const addMedia = async (cloudinaryData) => {
+    // If it's already a registered Media document returned from server upload, prepend directly to state
+    if (cloudinaryData?._id) {
+      setMedia(prev => [cloudinaryData, ...prev.filter(m => m._id !== cloudinaryData._id)]);
+      return cloudinaryData;
+    }
     const newMedia = await registerMedia(projectId, cloudinaryData);
     setMedia(prev => [newMedia, ...prev]);
     return newMedia;

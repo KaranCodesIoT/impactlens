@@ -1,73 +1,42 @@
 import { useState, useCallback } from 'react';
-import { Upload, CloudUpload, X } from 'lucide-react';
+import { CloudUpload, Loader2, CheckCircle2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { registerMedia } from '../services/api';
+import { uploadMedia } from '../services/api';
 
-const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
-const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
-
-export default function MediaUploader({ projectId, projectSlug, onMediaAdded }) {
+export default function MediaUploader({ projectId, projectSlug, onMediaAdded, onProcessingStart }) {
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState([]);
+  const [uploadItems, setUploadItems] = useState([]);
 
   const uploadFile = async (file) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('upload_preset', UPLOAD_PRESET);
-    formData.append('folder', `impactlens/${projectSlug}`);
-    formData.append('tags', projectId);
-    formData.append('context', `project_id=${projectId}`);
+    const previewUrl = URL.createObjectURL(file);
+    const itemKey = `${file.name}-${Date.now()}-${Math.random()}`;
 
-    const progressId = Date.now() + Math.random();
-    setUploadProgress(prev => [...prev, { id: progressId, name: file.name, progress: 0 }]);
+    setUploadItems(prev => [
+      ...prev,
+      { id: itemKey, name: file.name, previewUrl, progress: 0, status: 'uploading' }
+    ]);
 
     try {
-      const resourceType = file.type.startsWith('video/') ? 'video' : 'image';
-
-      const xhr = new XMLHttpRequest();
-      const result = await new Promise((resolve, reject) => {
-        xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) {
-            const pct = Math.round((e.loaded / e.total) * 100);
-            setUploadProgress(prev =>
-              prev.map(p => p.id === progressId ? { ...p, progress: pct } : p)
-            );
-          }
-        });
-        xhr.addEventListener('load', () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve(JSON.parse(xhr.responseText));
-          } else {
-            reject(new Error(`Upload failed: ${xhr.statusText}`));
-          }
-        });
-        xhr.addEventListener('error', () => reject(new Error('Upload failed')));
-        xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/${resourceType}/upload`);
-        xhr.send(formData);
+      const media = await uploadMedia(projectId, file, (pct) => {
+        setUploadItems(prev =>
+          prev.map(p => p.id === itemKey ? { ...p, progress: pct } : p)
+        );
       });
 
-      // Register with our backend
-      const media = await registerMedia(projectId, {
-        public_id: result.public_id,
-        secure_url: result.secure_url,
-        resource_type: result.resource_type,
-        format: result.format,
-        bytes: result.bytes,
-        width: result.width,
-        height: result.height,
-        original_filename: result.original_filename,
-        tags: result.tags || []
-      });
+      setUploadItems(prev =>
+        prev.map(p => p.id === itemKey ? { ...p, progress: 100, status: 'ready' } : p)
+      );
 
-      setUploadProgress(prev => prev.filter(p => p.id !== progressId));
       onMediaAdded?.(media);
-      toast.success(`${file.name} uploaded & analyzing...`);
-
       return media;
     } catch (err) {
-      setUploadProgress(prev => prev.filter(p => p.id !== progressId));
-      toast.error(`Failed to upload ${file.name}`);
+      console.error('Upload error:', err);
+      const detail = err.response?.data?.error || err.message;
+      setUploadItems(prev =>
+        prev.map(p => p.id === itemKey ? { ...p, status: 'error' } : p)
+      );
+      toast.error(detail ? `Upload error: ${detail}` : `Failed to upload ${file.name}`);
       throw err;
     }
   };
@@ -77,9 +46,19 @@ export default function MediaUploader({ projectId, projectSlug, onMediaAdded }) 
     if (fileArray.length === 0) return;
 
     setUploading(true);
-    const promises = fileArray.map(f => uploadFile(f).catch(() => null));
+    onProcessingStart?.(fileArray.length);
+
+    const promises = fileArray.map((f, i) =>
+      uploadFile(f, fileArray.length, i).catch(() => null)
+    );
+
     await Promise.allSettled(promises);
     setUploading(false);
+    toast.success('Upload complete — analysis starting');
+
+    setTimeout(() => {
+      setUploadItems([]);
+    }, 4000);
   }, [projectId, projectSlug]);
 
   const handleDrop = (e) => {
@@ -88,23 +67,23 @@ export default function MediaUploader({ projectId, projectSlug, onMediaAdded }) 
     handleFiles(e.dataTransfer.files);
   };
 
-  const handleDragOver = (e) => {
-    e.preventDefault();
-    setDragActive(true);
-  };
+  const completedCount = uploadItems.filter(i => i.status === 'ready').length;
+  const avgProgress = uploadItems.length > 0
+    ? Math.round(uploadItems.reduce((acc, curr) => acc + curr.progress, 0) / uploadItems.length)
+    : 0;
 
   return (
     <div className="space-y-4">
-      {/* Drop zone */}
+      {/* Drop Zone */}
       <div
         onDrop={handleDrop}
-        onDragOver={handleDragOver}
+        onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
         onDragLeave={() => setDragActive(false)}
-        className={`relative border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer
-          ${dragActive
-            ? 'border-primary-400 bg-primary-500/10'
-            : 'border-white/10 hover:border-white/20 hover:bg-white/[0.02]'
-          }`}
+        className={`relative border-2 border-dashed rounded-xl p-6 sm:p-8 text-center transition-all bg-white cursor-pointer ${
+          dragActive
+            ? 'border-stone-400 bg-stone-50'
+            : 'border-stone-200 hover:border-stone-300 hover:bg-stone-50/50'
+        }`}
         onClick={() => document.getElementById('file-input').click()}
       >
         <input
@@ -116,40 +95,67 @@ export default function MediaUploader({ projectId, projectSlug, onMediaAdded }) 
           onChange={(e) => handleFiles(e.target.files)}
         />
 
-        <div className="flex flex-col items-center gap-3">
-          <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-colors
-            ${dragActive ? 'bg-primary-500/20' : 'bg-white/5'}`}>
-            <CloudUpload size={28} className={dragActive ? 'text-primary-400' : 'text-surface-700'} />
+        <div className="flex flex-col items-center gap-2.5 max-w-sm mx-auto">
+          <div className="w-11 h-11 rounded-xl bg-stone-100 text-stone-500 flex items-center justify-center border border-stone-200">
+            <CloudUpload size={20} />
           </div>
           <div>
-            <p className="text-sm font-medium text-surface-200">
-              {dragActive ? 'Drop files here' : 'Drag & drop photos or videos'}
+            <p className="text-[13px] font-semibold text-stone-800">
+              Drop files here or click to browse
             </p>
-            <p className="text-xs text-surface-700 mt-1">
-              or click to browse · JPG, PNG, WebP, MP4, MOV · up to 50MB
+            <p className="text-[11px] text-stone-400 mt-0.5">
+              JPG, PNG, MP4, MOV — up to 2GB each
             </p>
           </div>
         </div>
       </div>
 
-      {/* Upload progress bars */}
-      {uploadProgress.length > 0 && (
-        <div className="space-y-2">
-          {uploadProgress.map(item => (
-            <div key={item.id} className="glass-card p-3 flex items-center gap-3">
-              <Upload size={14} className="text-primary-400 animate-pulse flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-xs text-surface-200 truncate">{item.name}</p>
-                <div className="w-full h-1.5 bg-white/5 rounded-full mt-1.5 overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-primary-600 to-primary-400 rounded-full transition-all duration-300"
-                    style={{ width: `${item.progress}%` }}
-                  />
-                </div>
-              </div>
-              <span className="text-xs text-surface-700 flex-shrink-0">{item.progress}%</span>
+      {/* Upload Progress */}
+      {uploadItems.length > 0 && (
+        <div className="bg-white rounded-xl border border-stone-200 p-4 sm:p-5 space-y-3 animate-fade-in">
+          <div className="flex items-center justify-between text-[12px] font-medium text-stone-700">
+            <div className="flex items-center gap-2">
+              <Loader2 size={13} className="text-stone-500 animate-spin" />
+              <span>
+                {uploading
+                  ? `Uploading ${completedCount}/${uploadItems.length}`
+                  : `Done — ${completedCount}/${uploadItems.length}`}
+              </span>
             </div>
-          ))}
+            <span className="text-stone-900 font-semibold tabular-nums">{avgProgress}%</span>
+          </div>
+
+          <div className="w-full h-1.5 bg-stone-100 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-stone-700 rounded-full transition-all duration-300"
+              style={{ width: `${avgProgress}%` }}
+            />
+          </div>
+
+          <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2 pt-1">
+            {uploadItems.map(item => (
+              <div
+                key={item.id}
+                className="relative aspect-square rounded-lg overflow-hidden border border-stone-200 bg-stone-100"
+              >
+                <img
+                  src={item.previewUrl}
+                  alt={item.name}
+                  className="w-full h-full object-cover"
+                />
+                {item.status === 'uploading' && (
+                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white text-[10px] font-bold">
+                    {item.progress}%
+                  </div>
+                )}
+                {item.status === 'ready' && (
+                  <div className="absolute top-1 right-1 w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow">
+                    <CheckCircle2 size={10} />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

@@ -9,11 +9,10 @@ const ProjectSchema = new Schema({
   location:    { type: String, default: '' },
   category: {
     type: String,
-    enum: ['environment', 'infrastructure', 'agriculture', 'education',
-           'health', 'water', 'energy', 'other'],
-    default: 'other'
+    default: 'auto-detect',
+    trim: true
   },
-  coverImage:  { type: String },
+  coverImage:  { type: String, default: null },
   stats: {
     totalMedia:    { type: Number, default: 0 },
     analyzedMedia: { type: Number, default: 0 },

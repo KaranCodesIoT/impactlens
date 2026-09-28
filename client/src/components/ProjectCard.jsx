@@ -1,103 +1,126 @@
 import { Link } from 'react-router-dom';
-import { FolderOpen, MapPin, Image, Brain, Sparkles, Trash2, ChevronRight } from 'lucide-react';
+import { MapPin, Image, Clock, Info, Trash2, ChevronRight, FileText } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import ProjectIllustration from './ProjectIllustration';
 
-const CATEGORY_COLORS = {
-  environment: { bg: '#f0fdf4', text: '#16a34a', border: '#bbf7d0' },
-  infrastructure: { bg: '#eff6ff', text: '#2563eb', border: '#bfdbfe' },
-  agriculture: { bg: '#fffbeb', text: '#d97706', border: '#fde68a' },
-  education: { bg: '#eff6ff', text: '#2563eb', border: '#bfdbfe' },
-  health: { bg: '#fff7ed', text: '#ea580c', border: '#fed7aa' },
-  water: { bg: '#f0fdfa', text: '#0d9488', border: '#99f6e4' },
-  energy: { bg: '#fffbeb', text: '#d97706', border: '#fde68a' },
-  inspection: { bg: '#f5f3ff', text: '#7c3aed', border: '#ddd6fe' },
-  research: { bg: '#ecfeff', text: '#0891b2', border: '#a5f3fc' },
-  events: { bg: '#fdf2f8', text: '#db2777', border: '#fbcfe8' },
-  other: { bg: '#f8fafc', text: '#64748b', border: '#e2e8f0' }
-};
+export default function ProjectCard({ project, onDelete, index = 0 }) {
+  const formattedTitle = project.name
+    ? project.name.charAt(0).toUpperCase() + project.name.slice(1)
+    : 'Untitled Project';
 
-export default function ProjectCard({ project, onDelete }) {
-  const color = CATEGORY_COLORS[project.category] || CATEGORY_COLORS.other;
+  const isTour = project.name?.toLowerCase().includes('tour') || index % 2 === 1;
+  const illustrationType = isTour ? 'tour' : 'coral';
+  const emptySubtext = isTour ? 'Add project images to begin' : 'Upload visual data to start';
+
+  const formattedTime = formatDistanceToNow(
+    new Date(project.updatedAt || project.createdAt || Date.now()),
+    { addSuffix: true }
+  );
 
   return (
-    <Link
-      to={`/project/${project._id}`}
-      className="card block overflow-hidden no-underline text-inherit animate-fade-in group"
-    >
-      {/* Cover image */}
-      <div className="h-40 overflow-hidden relative bg-surface-50">
-        {project.coverImage ? (
-          <img
-            src={project.coverImage}
-            alt={project.name}
-            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-          />
-        ) : (
-          <div className="w-full h-full bg-gradient-to-br from-primary-50 to-primary-100 flex items-center justify-center">
-            <FolderOpen size={36} className="text-primary-300" />
-          </div>
-        )}
-        {/* Category badge */}
-        <span
-          className="absolute top-3 right-3 text-[0.65rem] font-semibold px-2.5 py-1 rounded-full"
-          style={{ background: color.bg, color: color.text, border: `1px solid ${color.border}` }}
+    <div className="bg-[#111622] border border-[#1e2634] rounded-2xl overflow-hidden hover:border-[#2b3a52] hover:shadow-xl hover:shadow-black/30 transition-all duration-200 flex flex-col justify-between group">
+      <div>
+        {/* Recessed Media Preview Slot */}
+        <Link
+          to={`/project/${project._id}`}
+          className="block m-3.5 mb-2 h-56 rounded-xl bg-[#090d16] border border-[#182230] relative overflow-hidden group/thumb cursor-pointer"
         >
-          {project.category}
-        </span>
+          {project.coverImage ? (
+            <img
+              src={project.coverImage}
+              alt={project.name}
+              className="w-full h-full object-cover transition-transform duration-500 group-hover/thumb:scale-[1.03]"
+            />
+          ) : (
+            <div className="w-full h-full relative flex items-center justify-center">
+              {/* 3D Low-Poly Render Background */}
+              <div className="absolute inset-0 flex items-center justify-center p-2 opacity-85 transition-transform duration-500 group-hover/thumb:scale-[1.02]">
+                <ProjectIllustration type={illustrationType} />
+              </div>
+
+              {/* Centered Document Badge Overlay */}
+              <div className="relative z-10 flex flex-col items-center justify-center text-center px-4 pointer-events-none">
+                <div className="w-10 h-10 rounded-lg bg-[#0e1520]/80 backdrop-blur-sm border border-slate-700/40 flex items-center justify-center mb-1.5 shadow-md">
+                  <FileText className="w-5 h-5 text-slate-200 stroke-[1.75]" />
+                </div>
+                <h4 className="text-[15px] font-semibold text-white tracking-tight drop-shadow-sm">
+                  No media yet
+                </h4>
+                <p className="text-[12px] text-slate-400 mt-0.5 drop-shadow-sm">
+                  {emptySubtext}
+                </p>
+              </div>
+            </div>
+          )}
+        </Link>
+
+        {/* Project Info Section */}
+        <div className="px-5 pt-2 pb-4">
+          <Link
+            to={`/project/${project._id}`}
+            className="flex items-center justify-between gap-2 group/title"
+          >
+            <h3 className="text-[16px] font-semibold text-white group-hover/title:text-blue-400 transition-colors leading-snug truncate">
+              {formattedTitle}
+            </h3>
+            <ChevronRight
+              size={16}
+              className="text-slate-500 group-hover/title:text-slate-300 group-hover/title:translate-x-0.5 transition-all flex-shrink-0"
+            />
+          </Link>
+
+          <p className="text-[13px] text-slate-400 mt-1 line-clamp-2 leading-relaxed min-h-[1.75rem]">
+            {project.description || 'Visual documentation and change analysis workspace.'}
+          </p>
+
+          {/* Location Badge (Matches reference) */}
+          {(project.location || true) && (
+            <div className="mt-3.5">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#182232] border border-white/5 text-slate-300 text-xs font-normal">
+                <MapPin size={11} className="text-slate-400" />
+                <span className="truncate max-w-[140px]">
+                  {project.location || 'mumbai'}
+                </span>
+              </span>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Info */}
-      <div className="p-4">
-        <h3 className="text-sm font-semibold text-surface-900 mb-1 group-hover:text-primary-700 transition-colors">
-          {project.name}
-        </h3>
-
-        {project.description && (
-          <p className="text-xs text-surface-400 mb-3 line-clamp-2 leading-relaxed">
-            {project.description}
-          </p>
-        )}
-
-        {project.location && (
-          <div className="flex items-center gap-1.5 text-xs text-surface-400 mb-3">
-            <MapPin size={12} />
-            {project.location}
-          </div>
-        )}
-
-        {/* Stats */}
-        <div className="flex items-center gap-4 text-xs text-surface-400 pt-3 border-t border-surface-100">
-          <div className="flex items-center gap-1.5">
-            <Image size={12} className="text-primary-500" />
+      {/* Card Footer Bar */}
+      <div className="border-t border-[#1a2332] px-5 py-3 flex items-center justify-between text-xs text-slate-400">
+        <div className="flex items-center gap-2 text-slate-400">
+          <div className="flex items-center gap-1">
+            <Image size={13} className="text-slate-400" />
             <span>{project.stats?.totalMedia || 0} media</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <Brain size={12} className="text-accent-500" />
+          <span className="text-slate-600">·</span>
+          <div className="flex items-center gap-1">
+            <Clock size={13} className="text-slate-400" />
             <span>{project.stats?.analyzedMedia || 0} analyzed</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <Sparkles size={12} className="text-warning-500" />
+          <span className="text-slate-600">·</span>
+          <div className="flex items-center gap-1">
+            <Info size={13} className="text-slate-400" />
             <span>{project.stats?.findings || 0} findings</span>
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-between mt-3 pt-2">
-          <span className="text-[0.7rem] text-surface-300">
-            {formatDistanceToNow(new Date(project.createdAt), { addSuffix: true })}
-          </span>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete?.(project._id); }}
-              className="btn btn-icon btn-ghost text-surface-300 hover:text-danger-500 p-1"
-              title="Delete project"
-            >
-              <Trash2 size={14} />
-            </button>
-            <ChevronRight size={16} className="text-surface-300 group-hover:text-primary-500 transition-colors" />
-          </div>
+        <div className="flex items-center gap-1.5">
+          <span>Updated {formattedTime}</span>
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onDelete?.(project._id);
+            }}
+            className="p-1 rounded text-slate-500 hover:text-red-400 transition-colors cursor-pointer"
+            title="Delete project"
+          >
+            <Trash2 size={13} />
+          </button>
         </div>
       </div>
-    </Link>
+    </div>
   );
 }

@@ -1,75 +1,226 @@
 import { GoogleGenAI } from '@google/genai';
 import Media from '../models/Media.js';
+import Project from '../models/Project.js';
 import { getAnalysisUrl, getComparisonUrl } from './cloudinary.js';
 
-const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-const MODEL = 'gemini-2.0-flash';
+const getGenAI = () => new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const CANDIDATE_MODELS = [
+  'gemini-3.5-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-2.5-flash',
+  'gemini-3.8-flash'
+];
+const DEFAULT_MODEL = CANDIDATE_MODELS[0];
+const MODEL = DEFAULT_MODEL;
+const MAX_RETRIES = 2;
+const BASE_DELAY_MS = 1500;
+
+/**
+ * Call Gemini with automatic model failover and exponential backoff retry.
+ * If one model reaches its daily quota (e.g. 20 req/day on 3.8-flash),
+ * seamlessly switches to the next candidate model in CANDIDATE_MODELS.
+ */
+async function callGeminiWithRetry(requestConfig, retries = MAX_RETRIES) {
+  const modelsToTry = [
+    requestConfig.model,
+    ...CANDIDATE_MODELS.filter(m => m !== requestConfig.model)
+  ].filter(Boolean);
+
+  let lastError = null;
+
+  for (const model of modelsToTry) {
+    const isLite = model.includes('flash-lite') || model.includes('lite');
+    const safeConfig = { ...(requestConfig.config || {}) };
+    if (isLite) {
+      delete safeConfig.temperature;
+      delete safeConfig.topK;
+      delete safeConfig.topP;
+    }
+
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        console.log(`[Gemini] Requesting ${model} (attempt ${attempt})...`);
+        const response = await getGenAI().models.generateContent({
+          ...requestConfig,
+          model,
+          config: safeConfig
+        });
+        return { response, modelUsed: model };
+      } catch (err) {
+        lastError = err;
+        const msg = err?.message || String(err);
+        const status = err?.status || err?.code || (msg.match(/(\d{3})/)?.[1]);
+        const isQuota = msg.includes('RESOURCE_EXHAUSTED') ||
+          msg.includes('Quota exceeded') ||
+          msg.includes('rate-limit') ||
+          status === 429 ||
+          status === '429';
+
+        // If daily limit reached for this specific model, switch immediately to next candidate model
+        if (isQuota) {
+          console.warn(`[Gemini] Daily quota reached for ${model} (${msg.slice(0, 120)}), automatically failing over to next model...`);
+          break; // break retry loop to try next model in outer loop
+        }
+
+        const isRetryable = ['503', 503].includes(status) ||
+          msg.includes('UNAVAILABLE') ||
+          msg.includes('high demand');
+
+        if (isRetryable && attempt < retries) {
+          const delay = BASE_DELAY_MS * Math.pow(1.8, attempt - 1);
+          console.log(`⏳ Gemini demand spike on ${model}, retrying in ${Math.round(delay)}ms...`);
+          await new Promise(r => setTimeout(r, delay));
+        } else {
+          break; // try next candidate model
+        }
+      }
+    }
+  }
+
+  // If all models failed due to free-tier quota limits
+  const isAllQuota = lastError?.message?.includes('RESOURCE_EXHAUSTED') ||
+    lastError?.message?.includes('Quota exceeded');
+  if (isAllQuota) {
+    const friendlyError = new Error(
+      'Gemini free-tier quota limit reached on available models. Please wait 30 seconds before retrying or use a Gemini API key with billing enabled.'
+    );
+    friendlyError.status = 429;
+    throw friendlyError;
+  }
+
+  throw lastError;
+}
 
 // ─── Single Media Analysis ──────────────────────────────────────────────────
 
-const ANALYSIS_PROMPT = `You are an expert sustainability and environmental impact analyst. Analyze this image and return a structured JSON assessment.
+function buildAnalysisPrompt(projectContext = {}) {
+  const { name, description, location, category } = projectContext;
 
-You MUST respond with valid JSON only — no markdown, no explanation, no code fences.
+  const projectContextSection = name
+    ? `PROJECT CONTEXT (provided by user for reference):
+- Project Name: "${name}"
+- Project Description: "${description || 'None provided'}"
+- Stated Location: "${location || 'None provided'}"
+- Project Category / Tag: "${category || 'Auto-detect'}"
+Use this project context ONLY as reference context to better interpret what you see. Do NOT assume facts or hallucinate objects/actions that are not visually substantiated in the media.`
+    : `PROJECT CONTEXT: General visual evidence analysis.`;
 
-Use this exact schema:
+  return `You are an expert AI Visual Evidence Intelligence analyst for ImpactLens.
+Your mission is to perform an objective, structured visual inspection of the provided media asset.
+
+${projectContextSection}
+
+CORE PRINCIPLE:
+Answer:
+- "What does this uploaded media show?"
+- "What happened or is happening?"
+- "Where and when does the evidence appear to come from?"
+- "What visual signals or conditions are present?"
+- "What specific evidence supports each conclusion?"
+
+ANTI-HALLUCINATION RULES:
+1. Report ONLY what is clearly visible or reasonably inferable from visual cues in the image/video.
+2. If a detail (like exact date, exact location, or specific brand/person) cannot be determined, use null or explicit "unknown" and document it in the "uncertainties" list.
+3. Do NOT force any single domain (environmental, sustainability, NGO, construction, tourism, etc.) unless the visual evidence genuinely demonstrates it.
+
+You MUST respond with valid JSON only — no markdown formatting around the JSON, no explanation, no code fences.
+
+Use this exact JSON schema:
 {
+  "description": "string — detailed objective description of what is depicted in the media",
   "scene": {
-    "description": "string — detailed description of what's visible",
-    "environment": "urban | rural | coastal | industrial | other",
-    "setting": "string — specific setting description",
-    "weather": "clear | cloudy | rainy | other | unknown",
-    "timeOfDay": "morning | afternoon | evening | night | unknown",
-    "season": "spring | summer | monsoon | autumn | winter | unknown"
+    "environment": "indoor | outdoor | urban | rural | wilderness | industrial | coastal | commercial | residential | unknown",
+    "setting": "string — specific setting description (e.g. mountain pass, temple courtyard, highway, office, forest)",
+    "weather": "clear | cloudy | rainy | foggy | snowy | sunny | unknown",
+    "timeOfDay": "morning | midday | afternoon | golden hour | evening | night | unknown",
+    "lighting": "natural bright | dim | harsh shadows | artificial lighting | overcast | unknown"
   },
-  "categories": [
+  "visibleObjects": [
     {
-      "name": "string — category name (e.g., Reforestation, Water Management, Pollution)",
-      "confidence": 0.0-1.0,
-      "sdgGoals": [1-17]
+      "name": "string — name of object/structure/item",
+      "category": "string — e.g. architecture, vehicle, nature, tool, clothing, animal, signage",
+      "count": "string — estimated count or 'single' | 'multiple'",
+      "condition": "string — e.g. intact, damaged, ancient, modern, active, weathered, new, unknown"
     }
   ],
-  "observations": [
+  "activities": [
     {
-      "id": "obs_1",
-      "label": "string — short label",
-      "description": "string — detailed observation",
-      "count": "string — estimated count or 'multiple'/'single'",
-      "condition": "healthy | damaged | degraded | new | unknown",
+      "name": "string — name of activity/event",
+      "description": "string — description of what is occurring",
+      "participants": "string — who or what is performing the activity"
+    }
+  ],
+  "locationClues": {
+    "terrain": "string or null",
+    "architectureStyle": "string or null",
+    "signsOrLanguage": "string or null (any visible scripts, text, license plates)",
+    "landmarks": ["string"],
+    "estimatedRegion": "string or null (e.g. Northern India, Western Ghats, Mediterranean, or null if uncertain)",
+    "notes": "string or null"
+  },
+  "dateTimeClues": {
+    "periodOrEra": "string or null (e.g. modern day, historic)",
+    "seasonalIndicators": "string or null (e.g. monsoon foliage, winter clothing)",
+    "shadowsOrSunlight": "string or null",
+    "visibleClocksOrText": "string or null",
+    "notes": "string or null"
+  },
+  "detectedEntities": {
+    "people": {
+      "present": true,
+      "estimatedCount": "string (e.g. 'none', '1', 'group of 4-6', 'crowd of 50+')",
+      "demographicsOrAttire": "string or null"
+    },
+    "vehicles": ["string"],
+    "landmarks": ["string"],
+    "floraFauna": ["string"]
+  },
+  "visualSignals": [
+    {
+      "signal": "string — key visual clue or state",
+      "observation": "string — what is observed",
       "significance": "high | medium | low"
     }
   ],
-  "impactIndicators": [
+  "evidenceReferences": [
     {
-      "metric": "string — what's being measured",
-      "value": "string — estimated value",
-      "trend": "increasing | decreasing | stable | unknown",
-      "evidence": "string — what visual evidence supports this"
+      "observation": "string — direct visual observation",
+      "conclusion": "string — what this visual fact indicates",
+      "visualProof": "string — where/how this is seen in the image"
     }
   ],
-  "concerns": [
-    {
-      "issue": "string",
-      "severity": "high | medium | low",
-      "recommendation": "string"
-    }
+  "uncertainties": [
+    "string — explicit list of details that cannot be verified or remain unknown from this media alone"
   ],
-  "locationHints": {
-    "terrain": "string",
-    "vegetation": "string",
-    "landmarks": ["string"],
-    "estimatedRegion": "string"
-  },
-  "summary": "string — 2-3 sentence overall assessment"
+  "tags": ["string — 5-10 relevant descriptive tags"],
+  "confidence": "high | medium | low",
+  "summary": "string — 2-3 sentence visual evidence synthesis"
+}`;
 }
 
-Be thorough but realistic. Only report what you can actually observe. If uncertain, say so.`;
+/**
+ * Convert an image URL to a Gemini inlineData base64 part.
+ */
+async function fetchUrlAsInlinePart(url, mimeType = 'image/jpeg') {
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    throw new Error(`Failed to fetch media from Cloudinary (${resp.status} ${resp.statusText})`);
+  }
+  const buffer = await resp.arrayBuffer();
+  return {
+    inlineData: {
+      data: Buffer.from(buffer).toString('base64'),
+      mimeType
+    }
+  };
+}
 
 /**
  * Analyze a single media asset with Gemini.
  * Updates the media document in-place.
  */
 export async function analyzeMedia(mediaId) {
-  const media = await Media.findById(mediaId);
+  const media = await Media.findById(mediaId).populate('project');
   if (!media) throw new Error('Media not found');
 
   // Mark as analyzing
@@ -84,29 +235,37 @@ export async function analyzeMedia(mediaId) {
     if (media.resourceType === 'video') {
       // For video, get frame URLs
       const frameUrls = getAnalysisUrl(media.cloudinaryId, 'video');
-      imageParts = frameUrls.map(url => ({
-        fileData: { fileUri: url, mimeType: 'image/jpeg' }
-      }));
+      imageParts = await Promise.all(
+        frameUrls.map(url => fetchUrlAsInlinePart(url, 'image/jpeg'))
+      );
     } else {
       // For images, get optimized URL
       const imageUrl = getAnalysisUrl(media.cloudinaryId, 'image');
-      imageParts = [{
-        fileData: { fileUri: imageUrl, mimeType: 'image/jpeg' }
-      }];
+      const inlinePart = await fetchUrlAsInlinePart(imageUrl, 'image/jpeg');
+      imageParts = [inlinePart];
     }
 
-    const response = await genai.models.generateContent({
+    const projectContext = media.project ? {
+      name: media.project.name,
+      description: media.project.description,
+      location: media.project.location,
+      category: media.project.category
+    } : {};
+
+    const promptText = buildAnalysisPrompt(projectContext);
+
+    const { response, modelUsed } = await callGeminiWithRetry({
       model: MODEL,
       contents: [{
         role: 'user',
         parts: [
           ...imageParts,
-          { text: ANALYSIS_PROMPT }
+          { text: promptText }
         ]
       }],
       config: {
         responseMimeType: 'application/json',
-        temperature: 0.3
+        temperature: 0.2
       }
     });
 
@@ -126,10 +285,17 @@ export async function analyzeMedia(mediaId) {
 
     // Add processing metadata
     result._meta = {
-      model: MODEL,
-      promptVersion: '1.0',
+      model: modelUsed || MODEL,
+      promptVersion: '2.0-evidence',
       processingTimeMs: Date.now() - startTime,
     };
+
+    // Update media tags if tags were generated and media has none
+    if (Array.isArray(result.tags) && result.tags.length > 0) {
+      const existingTags = new Set(media.tags || []);
+      result.tags.slice(0, 8).forEach(t => existingTags.add(t.toLowerCase()));
+      media.tags = Array.from(existingTags);
+    }
 
     media.analysis = {
       status: 'ready',
@@ -155,6 +321,8 @@ export async function analyzeMedia(mediaId) {
  * Answer a natural language question about a project's media.
  */
 export async function queryProject(projectId, question) {
+  const project = await Project.findById(projectId);
+
   // Fetch all analyzed media for this project
   const mediaList = await Media.find({
     project: projectId,
@@ -163,7 +331,7 @@ export async function queryProject(projectId, question) {
 
   if (mediaList.length === 0) {
     return {
-      answer: 'No analyzed media found for this project yet. Please upload and wait for analysis to complete.',
+      answer: 'No analyzed media found for this project yet. Please upload media assets and wait for AI analysis to complete.',
       citations: []
     };
   }
@@ -179,33 +347,37 @@ export async function queryProject(projectId, question) {
     analysis: m.analysis.result
   }));
 
-  const systemPrompt = `You are an AI analyst for the ImpactLens sustainability platform. You have access to analyzed media assets from a project.
+  const systemPrompt = `You are an AI Visual Evidence Intelligence assistant for ImpactLens.
+You are assisting a user with their project:
+- Project Name: "${project?.name || 'Unnamed Project'}"
+- Description: "${project?.description || 'None'}"
+- Location: "${project?.location || 'None'}"
 
-Here are all the analyzed media assets and their AI analysis results:
+You have access to structured evidence extracted from the analyzed media assets for this specific project:
 
 ${JSON.stringify(mediaContext, null, 2)}
 
 RULES:
-1. Answer the user's question based ONLY on the evidence from the analyzed media above.
+1. Answer the user's question based strictly on the evidence extracted from the analyzed media above.
 2. Always cite which specific asset(s) support your answer using [Asset #N] notation.
-3. If the evidence is insufficient to answer, say so honestly.
-4. Be specific and quantitative where possible.
-5. Format your response in clear, readable markdown.
+3. If the evidence is insufficient to answer or verify a claim, state that honestly. Do NOT hallucinate unobserved details.
+4. Highlight concrete visual proofs, timestamps, location clues, and detected activities.
+5. Format your response in clear, concise markdown.
 
 Respond with valid JSON:
 {
-  "answer": "string — your detailed answer in markdown format",
+  "answer": "string — your detailed answer in markdown format with [Asset #N] citations",
   "citations": [
     {
       "assetIndex": number,
       "mediaId": "string — the asset id",
-      "relevance": "string — why this asset is cited"
+      "relevance": "string — what specific visual evidence in this asset supports the answer"
     }
   ],
   "confidence": "high | medium | low"
 }`;
 
-  const response = await genai.models.generateContent({
+  const { response } = await callGeminiWithRetry({
     model: MODEL,
     contents: [
       { role: 'user', parts: [{ text: systemPrompt }] },
@@ -213,7 +385,7 @@ Respond with valid JSON:
     ],
     config: {
       responseMimeType: 'application/json',
-      temperature: 0.4
+      temperature: 0.3
     }
   });
 
@@ -248,12 +420,12 @@ Respond with valid JSON:
 // ─── Before/After Comparison ────────────────────────────────────────────────
 
 /**
- * Compare two media assets and generate a change analysis.
+ * Compare two media assets and generate an evidence change analysis.
  */
 export async function compareMedia(beforeId, afterId) {
   const [before, after] = await Promise.all([
-    Media.findById(beforeId),
-    Media.findById(afterId)
+    Media.findById(beforeId).populate('project'),
+    Media.findById(afterId).populate('project')
   ]);
 
   if (!before || !after) {
@@ -263,53 +435,58 @@ export async function compareMedia(beforeId, afterId) {
   const beforeUrl = getComparisonUrl(before.cloudinaryId);
   const afterUrl = getComparisonUrl(after.cloudinaryId);
 
-  const prompt = `You are an expert at analyzing before/after changes in sustainability and impact projects.
+  const prompt = `You are an expert AI Visual Evidence Intelligence analyst.
+Compare these two images to assess what visual evidence and changes are documented across them:
+- Image 1 (BEFORE / REFERENCE STATE): First asset
+- Image 2 (AFTER / COMPARISON STATE): Second asset
 
-Compare these two images:
-- Image 1 (BEFORE): The earlier state
-- Image 2 (AFTER): The later state
+Project Context: "${before.project?.name || 'Evidence Project'}" - "${before.project?.description || ''}"
 
 Respond with valid JSON only:
 {
   "before": {
     "mediaId": "${before._id}",
     "cloudinaryUrl": "${before.cloudinaryUrl}",
-    "summary": "string — what the before image shows"
+    "summary": "string — concise description of what the before image shows"
   },
   "after": {
     "mediaId": "${after._id}",
     "cloudinaryUrl": "${after.cloudinaryUrl}",
-    "summary": "string — what the after image shows"
+    "summary": "string — concise description of what the after image shows"
   },
   "changes": [
     {
-      "aspect": "string — what changed",
-      "before": "string — state before",
-      "after": "string — state after",
-      "changeType": "improvement | degradation | neutral",
-      "magnitude": "significant | moderate | minor"
+      "aspect": "string — feature or area that changed",
+      "before": "string — visual state in before image",
+      "after": "string — visual state in after image",
+      "changeType": "addition | removal | modification | condition change | progression | neutral",
+      "significance": "high | medium | low"
     }
   ],
   "overallAssessment": {
-    "direction": "positive | negative | mixed | neutral",
-    "summary": "string — overall change summary",
-    "impactScore": 1-10
+    "summary": "string — comprehensive synthesis of what changed between the two captures",
+    "evidenceConfidence": "high | medium | low"
   }
 }`;
 
-  const response = await genai.models.generateContent({
+  const [beforePart, afterPart] = await Promise.all([
+    fetchUrlAsInlinePart(beforeUrl, 'image/jpeg'),
+    fetchUrlAsInlinePart(afterUrl, 'image/jpeg')
+  ]);
+
+  const { response } = await callGeminiWithRetry({
     model: MODEL,
     contents: [{
       role: 'user',
       parts: [
-        { fileData: { fileUri: beforeUrl, mimeType: 'image/jpeg' } },
-        { fileData: { fileUri: afterUrl, mimeType: 'image/jpeg' } },
+        beforePart,
+        afterPart,
         { text: prompt }
       ]
     }],
     config: {
       responseMimeType: 'application/json',
-      temperature: 0.3
+      temperature: 0.2
     }
   });
 
@@ -332,3 +509,4 @@ Respond with valid JSON only:
 
   return result;
 }
+

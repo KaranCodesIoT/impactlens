@@ -1,8 +1,15 @@
 import { Router } from 'express';
+import multer from 'multer';
 import Media from '../models/Media.js';
 import Project from '../models/Project.js';
+import cloudinary from '../config/cloudinary.js';
 import { deleteFromCloudinary } from '../services/cloudinary.js';
 import { analyzeMedia } from '../services/gemini.js';
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 100 * 1024 * 1024 } // 100MB limit
+});
 
 const router = Router();
 
@@ -30,20 +37,31 @@ router.post('/projects/:id/media', async (req, res, next) => {
     if (!project) return res.status(404).json({ error: 'Project not found' });
 
     const {
-      public_id, secure_url, resource_type, format,
-      bytes, width, height, original_filename, tags
+      public_id, cloudinaryId,
+      secure_url, cloudinaryUrl, url,
+      resource_type, resourceType,
+      format, bytes, width, height,
+      original_filename, originalFilename,
+      tags
     } = req.body;
+
+    const mediaId = cloudinaryId || public_id;
+    const mediaUrl = cloudinaryUrl || secure_url || url;
+
+    if (!mediaId || !mediaUrl) {
+      return res.status(400).json({ error: 'Missing required cloudinaryId (or public_id) and cloudinaryUrl (or secure_url)' });
+    }
 
     const media = await Media.create({
       project: project._id,
-      cloudinaryId: public_id,
-      cloudinaryUrl: secure_url,
-      resourceType: resource_type || 'image',
+      cloudinaryId: mediaId,
+      cloudinaryUrl: mediaUrl,
+      resourceType: resourceType || resource_type || 'image',
       format,
       bytes,
       width,
       height,
-      originalFilename: original_filename,
+      originalFilename: originalFilename || original_filename,
       tags: tags || [],
       analysis: { status: 'pending' }
     });

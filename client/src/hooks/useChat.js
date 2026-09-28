@@ -31,10 +31,31 @@ export function useChat(projectId) {
       };
       setMessages(prev => [...prev, aiMsg]);
     } catch (err) {
+      const rawError = err.response?.data?.error || err.message;
+      let friendlyError = 'The AI visual analysis model is temporarily busy. Please try asking again in a moment.';
+
+      if (typeof rawError === 'string') {
+        try {
+          const parsed = JSON.parse(rawError);
+          const errorObj = parsed.error || parsed;
+          if (errorObj.code === 503 || errorObj.code === 429 || errorObj.message?.includes('demand')) {
+            friendlyError = 'The AI visual intelligence model is currently handling high demand. Please try again shortly.';
+          } else if (errorObj.message) {
+            friendlyError = errorObj.message;
+          }
+        } catch {
+          if (rawError.includes('demand') || rawError.includes('503') || rawError.includes('429')) {
+            friendlyError = 'The AI visual intelligence model is currently handling high demand. Please try again shortly.';
+          } else {
+            friendlyError = rawError;
+          }
+        }
+      }
+
       const errorMsg = {
         id: Date.now() + 1,
         role: 'assistant',
-        content: `Sorry, I encountered an error: ${err.response?.data?.error || err.message}`,
+        content: friendlyError,
         isError: true,
         timestamp: new Date()
       };

@@ -1,42 +1,22 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
-import {
-  Plus, FolderOpen, Sparkles, X, MapPin, Calendar, Image as ImageIcon,
-  Brain, TreePine, Building2, Wheat, ClipboardCheck, FlaskConical,
-  CalendarDays, MapPinned, Users, Upload, ChevronRight
-} from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, X, FolderGit2 } from 'lucide-react';
 import { useProjects } from '../hooks/useProjects';
+import EmptyState from '../components/EmptyState';
 import ProjectCard from '../components/ProjectCard';
 import toast from 'react-hot-toast';
 
-const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
-const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
-
-const USE_CASES = [
-  { id: 'environment', label: 'Environmental', icon: TreePine, color: '#22c55e', bg: '#f0fdf4' },
-  { id: 'infrastructure', label: 'Infrastructure', icon: Building2, color: '#3b82f6', bg: '#eff6ff' },
-  { id: 'agriculture', label: 'Agriculture', icon: Wheat, color: '#f59e0b', bg: '#fffbeb' },
-  { id: 'inspection', label: 'Inspection', icon: ClipboardCheck, color: '#8b5cf6', bg: '#f5f3ff' },
-  { id: 'research', label: 'Research', icon: FlaskConical, color: '#06b6d4', bg: '#ecfeff' },
-  { id: 'events', label: 'Events', icon: CalendarDays, color: '#ec4899', bg: '#fdf2f8' },
-  { id: 'water', label: 'Field Operations', icon: MapPinned, color: '#14b8a6', bg: '#f0fdfa' },
-  { id: 'health', label: 'Community Programs', icon: Users, color: '#f97316', bg: '#fff7ed' },
-];
-
 export default function Home() {
   const { projects, loading, addProject, removeProject } = useProjects();
+  const navigate = useNavigate();
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({
     name: '',
     description: '',
-    location: '',
-    category: 'environment',
-    startDate: '',
-    endDate: '',
-    coverImage: ''
+    location: ''
   });
   const [creating, setCreating] = useState(false);
-  const [thumbnailPreview, setThumbnailPreview] = useState(null);
+  const [showDetails, setShowDetails] = useState(false);
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -44,20 +24,25 @@ export default function Home() {
 
     setCreating(true);
     try {
-      await addProject(form);
-      toast.success('Project created!');
-      setForm({ name: '', description: '', location: '', category: 'environment', startDate: '', endDate: '', coverImage: '' });
-      setThumbnailPreview(null);
+      const created = await addProject({
+        name: form.name.trim(),
+        description: form.description.trim(),
+        location: form.location.trim(),
+        category: 'auto-detect'
+      });
+      toast.success('Project created');
+      setForm({ name: '', description: '', location: '' });
       setShowCreate(false);
+      setShowDetails(false);
+      navigate(`/project/${created._id}`);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to create project');
-    } finally {
       setCreating(false);
     }
   };
 
   const handleDelete = async (id) => {
-    if (!confirm('Delete this project and all its media?')) return;
+    if (!confirm('Delete this project and its media records?')) return;
     try {
       await removeProject(id);
       toast.success('Project deleted');
@@ -66,273 +51,181 @@ export default function Home() {
     }
   };
 
-  const handleThumbnailUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    // Show local preview immediately
-    setThumbnailPreview(URL.createObjectURL(file));
-
-    // Upload to Cloudinary
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('upload_preset', UPLOAD_PRESET);
-    formData.append('folder', 'impactlens/thumbnails');
-
-    try {
-      const res = await fetch(
-        `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
-        { method: 'POST', body: formData }
-      );
-      const data = await res.json();
-      setForm(prev => ({ ...prev, coverImage: data.secure_url }));
-    } catch {
-      toast.error('Thumbnail upload failed');
-    }
-  };
-
   return (
-    <div className="animate-fade-in">
-      {/* Page Header */}
-      <div className="page-header flex items-center justify-between">
+    <div className="w-full max-w-7xl mx-auto px-4 sm:px-8 py-6 sm:py-8 space-y-7 animate-fade-in text-slate-100">
+      {/* ─── Page Header Matching Reference ─────────────────────────── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-surface-900">Projects</h2>
-          <p className="text-sm text-surface-400 mt-0.5">Manage your impact & sustainability projects</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
+            Projects
+          </h1>
+          <p className="text-[14px] text-slate-400 mt-1">
+            Your visual documentation and change analysis workspaces
+          </p>
         </div>
-        <button onClick={() => setShowCreate(true)} className="btn btn-primary">
+
+        <button
+          onClick={() => { setShowCreate(true); setShowDetails(false); }}
+          className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-medium text-sm px-4 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all shadow-sm self-start sm:self-auto cursor-pointer"
+        >
           <Plus size={16} />
-          New Project
+          <span>New Project</span>
         </button>
       </div>
 
-      <div className="p-6 lg:p-8">
-        {/* Step Indicator */}
-        <div className="flex items-start gap-4 mb-8">
-          <div className="step-number">1</div>
-          <div>
-            <h3 className="text-lg font-bold text-surface-900">Create / Select a Project</h3>
-            <p className="text-sm text-surface-400 mt-0.5">Start a new project and set basic details.</p>
-          </div>
-        </div>
-
-        {/* Supported Use Cases */}
-        <div className="card-flat p-5 mb-8">
-          <h4 className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-4">Supported Use Cases</h4>
-          <div className="grid grid-cols-4 md:grid-cols-8 gap-3">
-            {USE_CASES.map(uc => {
-              const Icon = uc.icon;
-              return (
-                <button
-                  key={uc.id}
-                  onClick={() => {
-                    setForm(prev => ({ ...prev, category: uc.id }));
-                    setShowCreate(true);
-                  }}
-                  className={`usecase-chip ${form.category === uc.id ? 'selected' : ''}`}
-                >
-                  <div className="usecase-chip-icon" style={{ background: uc.bg }}>
-                    <Icon size={20} style={{ color: uc.color }} />
-                  </div>
-                  <span className="usecase-chip-label">{uc.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Project Grid */}
-        {loading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {[...Array(6)].map((_, i) => (
-              <div key={i} className="card-flat p-0 overflow-hidden">
-                <div className="h-40 skeleton" />
-                <div className="p-4 space-y-2">
-                  <div className="h-4 skeleton w-2/3" />
-                  <div className="h-3 skeleton w-1/2" />
-                </div>
+      {/* ─── Projects Grid (2 Columns matching reference) ─────────── */}
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="bg-[#111622] border border-[#1e2634] rounded-2xl overflow-hidden p-4 space-y-4">
+              <div className="h-56 bg-[#0a0e16] rounded-xl animate-pulse" />
+              <div className="space-y-2 px-1">
+                <div className="h-5 bg-[#182232] rounded w-2/3 animate-pulse" />
+                <div className="h-3.5 bg-[#182232] rounded w-1/2 animate-pulse" />
               </div>
-            ))}
-          </div>
-        ) : projects.length === 0 ? (
-          <div className="text-center py-20">
-            <div className="w-20 h-20 rounded-2xl bg-surface-100 flex items-center justify-center mx-auto mb-5">
-              <FolderOpen size={36} className="text-surface-300" />
             </div>
-            <h3 className="text-lg font-semibold text-surface-700 mb-2">No Projects Yet</h3>
-            <p className="text-sm text-surface-400 mb-6 max-w-sm mx-auto">
-              Create your first impact monitoring project to start uploading media and generating AI-powered insights.
-            </p>
-            <button onClick={() => setShowCreate(true)} className="btn btn-primary btn-lg">
-              <Plus size={18} /> Create First Project
+          ))}
+        </div>
+      ) : projects.length === 0 ? (
+        <EmptyState
+          icon={FolderGit2}
+          title="No projects yet"
+          description="Create a project to start uploading photos and videos. We'll automatically analyze your visual data and extract actionable insights."
+          action={
+            <button
+              onClick={() => { setShowCreate(true); setShowDetails(false); }}
+              className="bg-[#2563eb] hover:bg-blue-600 text-white font-medium text-sm px-4 py-2 rounded-lg flex items-center gap-1.5 shadow-sm transition-all"
+            >
+              <Plus size={15} /> Create Project
             </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {projects.map(p => (
-              <ProjectCard key={p._id} project={p} onDelete={handleDelete} />
-            ))}
-          </div>
-        )}
-      </div>
+          }
+          className="my-12"
+        />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {projects.map((p, idx) => (
+            <ProjectCard
+              key={p._id}
+              project={p}
+              onDelete={handleDelete}
+              index={idx}
+            />
+          ))}
+        </div>
+      )}
 
-      {/* ─── Create Project Modal ──────────────────────────────────────── */}
+      {/* ─── Create Project Modal (Dark SaaS Theme) ───────────────── */}
       {showCreate && (
-        <div className="modal-overlay" onClick={() => setShowCreate(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in"
+          onClick={() => !creating && setShowCreate(false)}
+        >
+          <div
+            className="bg-[#111622] border border-[#1e2634] rounded-2xl max-w-md w-full shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
             <form onSubmit={handleCreate}>
               {/* Modal Header */}
-              <div className="flex items-center justify-between p-6 pb-2">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-primary-100 flex items-center justify-center">
-                    <FolderOpen size={20} className="text-primary-600" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-surface-900">Create New Project</h3>
-                    <p className="text-xs text-surface-400">Organize your field media and get AI-powered insights.</p>
-                  </div>
+              <div className="flex items-center justify-between p-5 pb-4 border-b border-[#1a2332]">
+                <div>
+                  <h3 className="text-[16px] font-semibold text-white leading-tight">New Project</h3>
+                  <p className="text-[12px] text-slate-400 mt-0.5">Create a workspace for visual documentation</p>
                 </div>
-                <button type="button" onClick={() => setShowCreate(false)} className="btn btn-icon btn-ghost">
-                  <X size={18} />
+                <button
+                  type="button"
+                  onClick={() => setShowCreate(false)}
+                  disabled={creating}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-[#182232] transition-colors"
+                >
+                  <X size={16} />
                 </button>
               </div>
 
               {/* Modal Body */}
-              <div className="p-6 space-y-4">
-                {/* Project Name */}
+              <div className="p-5 space-y-4 text-slate-200">
                 <div>
-                  <label className="label">Project Name</label>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Project name <span className="text-red-400">*</span>
+                  </label>
                   <input
                     type="text"
-                    className="input"
+                    className="w-full px-3.5 py-2.5 bg-[#090d16] border border-[#1e2634] rounded-lg text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
-                    placeholder="Riverside Restoration Initiative"
+                    placeholder="e.g., Coral reef survey, Tour"
                     required
                     autoFocus
+                    disabled={creating}
                   />
                 </div>
 
-                {/* Description */}
                 <div>
-                  <label className="label">Description</label>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Description <span className="text-slate-500 font-normal">(optional)</span>
+                  </label>
                   <textarea
-                    className="input"
+                    className="w-full px-3.5 py-2.5 bg-[#090d16] border border-[#1e2634] rounded-lg text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all resize-none"
                     value={form.description}
                     onChange={(e) => setForm({ ...form, description: e.target.value })}
-                    placeholder="Restoration and monitoring of riverside area with regular site visits, documentation and progress tracking."
-                    rows={3}
+                    placeholder="Visual documentation and change analysis workspace."
+                    rows={2}
+                    disabled={creating}
                   />
                 </div>
 
-                {/* Location */}
+                {/* Collapsible Location */}
                 <div>
-                  <label className="label">Location (Optional)</label>
-                  <div className="relative">
-                    <MapPin size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-400" />
-                    <input
-                      type="text"
-                      className="input pl-10"
-                      value={form.location}
-                      onChange={(e) => setForm({ ...form, location: e.target.value })}
-                      placeholder="Pune, Maharashtra"
-                    />
-                  </div>
-                </div>
-
-                {/* Dates */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="label">Start Date</label>
-                    <div className="relative">
-                      <Calendar size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-400" />
-                      <input
-                        type="date"
-                        className="input pl-10"
-                        value={form.startDate}
-                        onChange={(e) => setForm({ ...form, startDate: e.target.value })}
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="label">End Date</label>
-                    <div className="relative">
-                      <Calendar size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-400" />
-                      <input
-                        type="date"
-                        className="input pl-10"
-                        value={form.endDate}
-                        onChange={(e) => setForm({ ...form, endDate: e.target.value })}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Category */}
-                <div>
-                  <label className="label">Category</label>
-                  <div className="grid grid-cols-4 gap-2">
-                    {USE_CASES.slice(0, 8).map(uc => {
-                      const Icon = uc.icon;
-                      return (
+                  {!showDetails ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowDetails(true)}
+                      className="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      + Add location
+                    </button>
+                  ) : (
+                    <div className="p-3.5 rounded-xl bg-[#090d16] border border-[#1e2634] space-y-2 animate-fade-in">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-semibold text-slate-300">
+                          Location
+                        </label>
                         <button
-                          key={uc.id}
                           type="button"
-                          onClick={() => setForm({ ...form, category: uc.id })}
-                          className={`flex items-center gap-2 p-2 rounded-lg border text-xs font-medium transition-all ${
-                            form.category === uc.id
-                              ? 'border-primary-500 bg-primary-50 text-primary-700'
-                              : 'border-surface-200 text-surface-500 hover:border-surface-300'
-                          }`}
+                          onClick={() => setShowDetails(false)}
+                          className="text-[11px] text-slate-500 hover:text-slate-300"
                         >
-                          <Icon size={14} style={{ color: uc.color }} />
-                          <span className="truncate">{uc.label}</span>
+                          Hide
                         </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Project Thumbnail */}
-                <div>
-                  <label className="label">Project Thumbnail</label>
-                  <div
-                    className="thumbnail-upload"
-                    onClick={() => document.getElementById('thumb-input').click()}
-                  >
-                    <input
-                      id="thumb-input"
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={handleThumbnailUpload}
-                    />
-                    {thumbnailPreview ? (
-                      <img src={thumbnailPreview} alt="Thumbnail preview" />
-                    ) : (
-                      <div className="thumbnail-upload-placeholder">
-                        <Upload size={24} />
-                        <span className="text-xs font-medium">Upload Image</span>
                       </div>
-                    )}
-                  </div>
+                      <input
+                        type="text"
+                        className="w-full px-3 py-2 bg-[#111622] border border-[#1e2634] rounded-lg text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 transition-all"
+                        value={form.location}
+                        onChange={(e) => setForm({ ...form, location: e.target.value })}
+                        placeholder="e.g., Mumbai, Great Barrier Reef"
+                        disabled={creating}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
 
               {/* Modal Footer */}
-              <div className="flex items-center justify-end gap-3 p-6 pt-2 border-t border-surface-100">
+              <div className="flex items-center justify-end gap-2.5 px-5 py-4 bg-[#090d16]/70 border-t border-[#1a2332]">
                 <button
                   type="button"
                   onClick={() => setShowCreate(false)}
-                  className="btn btn-secondary"
+                  disabled={creating}
+                  className="px-4 py-2 rounded-lg text-xs font-medium text-slate-300 hover:text-white hover:bg-[#182232] transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={creating || !form.name.trim()}
-                  className="btn btn-primary disabled:opacity-50"
+                  className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#2563eb] hover:bg-blue-600 disabled:opacity-50 text-white transition-all shadow-sm cursor-pointer"
                 >
-                  {creating ? 'Creating...' : 'Create Project'}
+                  {creating ? 'Creating...' : 'Create'}
                 </button>
               </div>
             </form>

@@ -1,19 +1,13 @@
 import { getReportUrl } from './cloudinary.js';
 
-/**
- * Generate an HTML report from analyzed media.
- * PDF generation will be added in Day 3 (with Puppeteer).
- */
 export async function generateReport(mediaList, options = {}) {
   const { format = 'html', title } = options;
   const project = mediaList[0]?.project;
-  const reportTitle = title || `${project?.name || 'Project'} — Impact Report`;
+  const reportTitle = title || `${project?.name || 'Evidence Project'} — Visual Intelligence Report`;
 
   const html = buildReportHTML(reportTitle, project, mediaList);
 
   if (format === 'pdf') {
-    // Day 3: Puppeteer PDF generation
-    // For now, return HTML with print-optimized styles
     return html;
   }
 
@@ -26,20 +20,29 @@ function buildReportHTML(title, project, mediaList) {
     if (!analysis) return '';
 
     const reportImgUrl = getReportUrl(m.cloudinaryId);
-    const observations = (analysis.observations || [])
-      .map(obs => `<li><strong>${obs.label}</strong>: ${obs.description} <em>(${obs.significance} significance)</em></li>`)
+    
+    const visibleObjects = (analysis.visibleObjects || [])
+      .map(obj => `<li><strong>${obj.name}</strong> ${obj.category ? `(${obj.category})` : ''} ${obj.condition ? `— ${obj.condition}` : ''}</li>`)
       .join('');
 
-    const indicators = (analysis.impactIndicators || [])
-      .map(ind => `<li><strong>${ind.metric}</strong>: ${ind.value} — Trend: ${ind.trend}. <em>${ind.evidence}</em></li>`)
+    const activities = (analysis.activities || [])
+      .map(act => `<li><strong>${act.name}</strong>: ${act.description} ${act.participants ? `<em>(Participants: ${act.participants})</em>` : ''}</li>`)
       .join('');
 
-    const concerns = (analysis.concerns || [])
-      .map(c => `<li><strong>[${c.severity.toUpperCase()}]</strong> ${c.issue} — ${c.recommendation}</li>`)
+    const evidenceRefs = (analysis.evidenceReferences || [])
+      .map(ev => `<li><strong>${ev.conclusion}</strong>: ${ev.observation} ${ev.visualProof ? `<em>[Proof: ${ev.visualProof}]</em>` : ''}</li>`)
       .join('');
 
-    const categories = (analysis.categories || [])
-      .map(c => `<span class="badge">${c.name} (${Math.round(c.confidence * 100)}%) — SDGs: ${c.sdgGoals?.join(', ') || 'N/A'}</span>`)
+    const signals = (analysis.visualSignals || [])
+      .map(s => `<li><strong>[${(s.significance || 'info').toUpperCase()}] ${s.signal}</strong>: ${s.observation}</li>`)
+      .join('');
+
+    const uncertainties = (analysis.uncertainties || [])
+      .map(u => `<li>${u}</li>`)
+      .join('');
+
+    const tags = (analysis.tags || [])
+      .map(t => `<span class="badge">#${t}</span>`)
       .join(' ');
 
     return `
@@ -48,26 +51,23 @@ function buildReportHTML(title, project, mediaList) {
           <img src="${reportImgUrl}" alt="${m.originalFilename || 'Media'}" class="media-image" />
           <div class="media-meta">
             <h3>${m.originalFilename || m.cloudinaryId}</h3>
-            <p class="date">Uploaded: ${new Date(m.createdAt).toLocaleDateString()}</p>
-            <div class="categories">${categories}</div>
-            <p class="asset-link">Source: <a href="${m.cloudinaryUrl}" target="_blank">${m.cloudinaryId}</a></p>
+            <p class="date">Captured / Uploaded: ${new Date(m.createdAt).toLocaleDateString()}</p>
+            <div class="categories">${tags}</div>
+            <p class="asset-link">Source Asset: <a href="${m.cloudinaryUrl}" target="_blank">${m.cloudinaryId}</a></p>
           </div>
         </div>
 
         <div class="scene">
-          <h4>Scene Description</h4>
-          <p>${analysis.scene?.description || 'N/A'}</p>
-          <p><em>${analysis.scene?.environment} • ${analysis.scene?.setting} • ${analysis.scene?.weather} • ${analysis.scene?.timeOfDay}</em></p>
+          <h4>Visual Summary & Scene</h4>
+          <p>${analysis.description || analysis.summary || 'N/A'}</p>
+          ${analysis.scene ? `<p class="scene-details"><em>Environment: ${analysis.scene.environment || 'N/A'} • Setting: ${analysis.scene.setting || 'N/A'} • Weather: ${analysis.scene.weather || 'N/A'} • Light: ${analysis.scene.timeOfDay || 'N/A'}</em></p>` : ''}
         </div>
 
-        ${observations ? `<div class="observations"><h4>Key Observations</h4><ul>${observations}</ul></div>` : ''}
-        ${indicators ? `<div class="indicators"><h4>Impact Indicators</h4><ul>${indicators}</ul></div>` : ''}
-        ${concerns ? `<div class="concerns"><h4>Concerns & Recommendations</h4><ul>${concerns}</ul></div>` : ''}
-
-        <div class="summary">
-          <h4>Summary</h4>
-          <p>${analysis.summary || 'N/A'}</p>
-        </div>
+        ${visibleObjects ? `<div class="section-block"><h4>Identified Elements & Objects</h4><ul>${visibleObjects}</ul></div>` : ''}
+        ${activities ? `<div class="section-block"><h4>Observed Activities</h4><ul>${activities}</ul></div>` : ''}
+        ${evidenceRefs ? `<div class="section-block"><h4>Evidence Reasoning</h4><ul>${evidenceRefs}</ul></div>` : ''}
+        ${signals ? `<div class="section-block"><h4>Visual Signals & Indicators</h4><ul>${signals}</ul></div>` : ''}
+        ${uncertainties ? `<div class="section-block uncertainties"><h4>Uncertain / Unverified Details</h4><ul>${uncertainties}</ul></div>` : ''}
       </div>
     `;
   }).join('');

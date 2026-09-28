@@ -25,6 +25,20 @@ export const getProjectMedia = (projectId, params = {}) =>
 export const registerMedia = (projectId, cloudinaryData) =>
   api.post(`/projects/${projectId}/media`, cloudinaryData).then(r => r.data);
 
+export const uploadMedia = (projectId, file, onProgress) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return api.post(`/projects/${projectId}/upload`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress: (progressEvent) => {
+      if (progressEvent.total && onProgress) {
+        const pct = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+        onProgress(pct);
+      }
+    }
+  }).then(r => r.data);
+};
+
 export const getMedia = (mediaId) => api.get(`/media/${mediaId}`).then(r => r.data);
 
 export const updateMedia = (mediaId, data) => api.put(`/media/${mediaId}`, data).then(r => r.data);

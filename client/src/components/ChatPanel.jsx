@@ -1,16 +1,23 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Sparkles, ExternalLink, Trash2 } from 'lucide-react';
+import { Search, ExternalLink, ArrowRight, Eye, CornerDownLeft, RotateCcw, MessageSquare } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useChat } from '../hooks/useChat';
 
-export default function ChatPanel({ projectId }) {
+const SUGGESTIONS = [
+  'What changed between earlier and later captures?',
+  'What conditions or activities are documented?',
+  'List all identified objects and entities',
+  'Describe the terrain and landmarks observed'
+];
+
+export default function ChatPanel({ projectId, onInspectMedia }) {
   const { messages, loading, sendMessage, clearMessages } = useChat(projectId);
   const [input, setInput] = useState('');
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, loading]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -19,149 +26,188 @@ export default function ChatPanel({ projectId }) {
     setInput('');
   };
 
-  const SUGGESTIONS = [
-    'What are the main sustainability activities visible?',
-    'How many trees or plants can you estimate?',
-    'What environmental concerns are visible?',
-    'Summarize the overall project impact',
-    'Which SDG goals does this project contribute to?'
-  ];
+  const handleSuggestionClick = (query) => {
+    sendMessage(query);
+  };
 
   return (
-    <div className="glass-card flex flex-col h-[500px]">
-      {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-white/5">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-primary-500/15 flex items-center justify-center">
-            <Bot size={16} className="text-primary-400" />
-          </div>
+    <div className="space-y-5 animate-fade-in text-slate-100">
+      {/* Query Input */}
+      <div className="bg-[#111622] border border-[#1e2634] rounded-xl p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
-            <h3 className="text-sm font-semibold text-surface-200">Evidence Q&A</h3>
-            <p className="text-[0.65rem] text-surface-700">Ask about your project media</p>
+            <h3 className="text-[14px] font-semibold text-white tracking-tight flex items-center gap-2">
+              <MessageSquare size={15} className="text-blue-400" />
+              Ask about your evidence
+            </h3>
+            <p className="text-[12px] text-slate-400 mt-0.5">
+              Ask questions grounded in the visual evidence you've uploaded.
+            </p>
           </div>
         </div>
-        {messages.length > 0 && (
-          <button onClick={clearMessages} className="btn btn-icon text-surface-700 hover:text-surface-200">
-            <Trash2 size={14} />
-          </button>
-        )}
+
+        <form onSubmit={handleSubmit} className="relative">
+          <div className="relative flex items-center">
+            <Search size={15} className="absolute left-3.5 text-slate-500 pointer-events-none" />
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="What do you want to know about your media?"
+              className="w-full pl-10 pr-24 py-2.5 bg-[#090d16] border border-[#1e2634] rounded-lg text-[13px] text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+              disabled={loading}
+            />
+            <button
+              type="submit"
+              disabled={loading || !input.trim()}
+              className="absolute right-2 px-3 py-1.5 bg-[#2563eb] hover:bg-blue-600 disabled:opacity-40 text-white rounded-md text-[12px] font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <span>Ask</span>
+              <CornerDownLeft size={11} />
+            </button>
+          </div>
+        </form>
+
+        {/* Suggestions */}
+        <div>
+          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
+            Try asking
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {SUGGESTIONS.map((s, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => handleSuggestionClick(s)}
+                disabled={loading}
+                className="text-left px-2.5 py-1.5 rounded-lg bg-[#090d16] hover:bg-[#182232] border border-[#1e2634] text-[12px] text-slate-300 hover:text-white transition-all flex items-center gap-1.5 group cursor-pointer"
+              >
+                <span>{s}</span>
+                <ArrowRight size={10} className="text-slate-500 group-hover:text-blue-400 group-hover:translate-x-0.5 transition-all" />
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.length === 0 ? (
-          <div className="text-center py-8">
-            <Sparkles size={24} className="text-primary-400/50 mx-auto mb-3" />
-            <p className="text-sm text-surface-700 mb-4">Ask questions about your uploaded media</p>
-            <div className="space-y-2">
-              {SUGGESTIONS.map((s, i) => (
-                <button
-                  key={i}
-                  onClick={() => { setInput(s); }}
-                  className="block w-full text-left text-xs text-surface-700 hover:text-primary-400 
-                    p-2.5 rounded-lg hover:bg-primary-500/5 transition-colors border border-transparent hover:border-primary-500/10"
-                >
-                  "{s}"
-                </button>
-              ))}
-            </div>
+      {/* Results */}
+      {messages.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between px-1">
+            <h4 className="text-[12px] font-semibold text-slate-400">
+              {messages.filter(m => m.role === 'assistant').length} {messages.filter(m => m.role === 'assistant').length === 1 ? 'result' : 'results'}
+            </h4>
+            <button
+              onClick={clearMessages}
+              className="text-[12px] text-slate-400 hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
+            >
+              <RotateCcw size={11} />
+              <span>Clear</span>
+            </button>
           </div>
-        ) : (
-          messages.map(msg => (
-            <div key={msg.id} className={`flex gap-3 animate-fade-in ${msg.role === 'user' ? 'justify-end' : ''}`}>
-              {msg.role === 'assistant' && (
-                <div className="w-7 h-7 rounded-lg bg-primary-500/15 flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <Bot size={14} className="text-primary-400" />
-                </div>
-              )}
-              <div className={`max-w-[80%] ${
-                msg.role === 'user'
-                  ? 'bg-primary-600/20 border border-primary-500/20 rounded-2xl rounded-tr-md px-4 py-2.5'
-                  : 'bg-white/[0.03] border border-white/5 rounded-2xl rounded-tl-md px-4 py-3'
-              }`}>
-                {msg.role === 'user' ? (
-                  <p className="text-sm text-surface-100">{msg.content}</p>
-                ) : (
-                  <div className="text-sm text-surface-200 prose-sm prose-invert">
+
+          <div className="space-y-3">
+            {messages.map((msg, index) => {
+              if (msg.role === 'user') {
+                return (
+                  <div key={msg.id || index} className="bg-[#141d2b] border border-[#1e2634] rounded-lg p-3.5 flex items-start gap-3">
+                    <div className="w-5 h-5 rounded bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-0.5">
+                      Q
+                    </div>
+                    <p className="text-[13px] font-medium text-white">
+                      {msg.content}
+                    </p>
+                  </div>
+                );
+              }
+
+              return (
+                <div
+                  key={msg.id || index}
+                  className={`bg-[#111622] border rounded-xl p-5 space-y-3 ${
+                    msg.isError ? 'border-red-500/40 bg-red-950/20' : 'border-[#1e2634]'
+                  }`}
+                >
+                  {/* Content */}
+                  <div className="text-[13px] text-slate-200 leading-relaxed prose prose-invert prose-sm max-w-none">
                     <ReactMarkdown>{msg.content}</ReactMarkdown>
                   </div>
-                )}
 
-                {/* Citations */}
-                {msg.citations?.length > 0 && (
-                  <div className="mt-3 pt-2 border-t border-white/5 space-y-1.5">
-                    <p className="text-[0.65rem] text-surface-700 uppercase font-semibold tracking-wider">Sources</p>
-                    {msg.citations.map((cite, i) => (
-                      <a
-                        key={i}
-                        href={cite.cloudinaryUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 text-xs text-primary-400 hover:text-primary-300 no-underline"
-                      >
-                        <ExternalLink size={10} />
-                        Asset #{cite.assetIndex} — {cite.relevance}
-                      </a>
-                    ))}
-                  </div>
-                )}
-
-                {msg.confidence && (
-                  <span className={`badge mt-2 ${
-                    msg.confidence === 'high' ? 'badge-success' :
-                    msg.confidence === 'medium' ? 'badge-warning' : 'badge-danger'
-                  }`}>
-                    {msg.confidence} confidence
-                  </span>
-                )}
-              </div>
-              {msg.role === 'user' && (
-                <div className="w-7 h-7 rounded-lg bg-accent-500/15 flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <User size={14} className="text-accent-400" />
+                  {/* Citations */}
+                  {msg.citations?.length > 0 && (
+                    <div className="pt-3 border-t border-[#1a2332] space-y-2">
+                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                        Supporting evidence ({msg.citations.length})
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {msg.citations.map((cite, i) => (
+                          <div
+                            key={i}
+                            className="flex items-start gap-3 p-3 rounded-lg border border-[#1e2634] bg-[#090d16] hover:border-[#2b3a52] transition-all"
+                          >
+                            {cite.thumbnailUrl || cite.cloudinaryUrl ? (
+                              <img
+                                src={cite.thumbnailUrl || cite.cloudinaryUrl}
+                                alt={`Asset #${cite.assetIndex}`}
+                                className="w-14 h-10 object-cover rounded-md border border-[#1a2332] flex-shrink-0"
+                              />
+                            ) : (
+                              <div className="w-14 h-10 rounded-md bg-[#182232] flex items-center justify-center text-[10px] text-slate-400 flex-shrink-0">
+                                #{cite.assetIndex}
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[12px] text-slate-300 line-clamp-2 leading-snug">
+                                {cite.relevance}
+                              </p>
+                              <div className="flex items-center gap-2 mt-1.5">
+                                {onInspectMedia && cite.mediaId && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onInspectMedia({ _id: cite.mediaId, cloudinaryUrl: cite.cloudinaryUrl })}
+                                    className="text-[11px] font-medium text-blue-400 hover:text-blue-300 flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Eye size={10} /> View
+                                  </button>
+                                )}
+                                <a
+                                  href={cite.cloudinaryUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[11px] text-slate-400 hover:text-slate-200 flex items-center gap-0.5"
+                                >
+                                  <ExternalLink size={9} /> Source
+                                </a>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          ))
-        )}
-
-        {loading && (
-          <div className="flex gap-3 animate-fade-in">
-            <div className="w-7 h-7 rounded-lg bg-primary-500/15 flex items-center justify-center flex-shrink-0">
-              <Bot size={14} className="text-primary-400" />
-            </div>
-            <div className="bg-white/[0.03] border border-white/5 rounded-2xl rounded-tl-md px-4 py-3">
-              <div className="flex gap-1.5">
-                <div className="w-2 h-2 rounded-full bg-primary-400/40 animate-bounce" style={{ animationDelay: '0ms' }} />
-                <div className="w-2 h-2 rounded-full bg-primary-400/40 animate-bounce" style={{ animationDelay: '150ms' }} />
-                <div className="w-2 h-2 rounded-full bg-primary-400/40 animate-bounce" style={{ animationDelay: '300ms' }} />
-              </div>
-            </div>
+              );
+            })}
           </div>
-        )}
-
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Input */}
-      <form onSubmit={handleSubmit} className="p-4 border-t border-white/5">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask about your project evidence..."
-            className="input flex-1"
-            disabled={loading}
-          />
-          <button
-            type="submit"
-            disabled={loading || !input.trim()}
-            className="btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Send size={16} />
-          </button>
         </div>
-      </form>
+      )}
+
+      {/* Loading */}
+      {loading && (
+        <div className="bg-[#111622] border border-[#1e2634] rounded-xl p-5 space-y-3">
+          <div className="flex items-center gap-2 text-[13px] text-slate-300">
+            <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+            <span>Thinking...</span>
+          </div>
+          <div className="space-y-2">
+            <div className="h-3 skeleton w-full" />
+            <div className="h-3 skeleton w-4/5" />
+            <div className="h-3 skeleton w-2/3" />
+          </div>
+        </div>
+      )}
+
+      <div ref={messagesEndRef} />
     </div>
   );
 }
