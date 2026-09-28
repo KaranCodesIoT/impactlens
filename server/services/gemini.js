@@ -1,7 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
 import Media from '../models/Media.js';
 import Project from '../models/Project.js';
-import { getAnalysisUrl, getComparisonUrl } from './cloudinary.js';
+import { getAnalysisUrl, getComparisonUrl, getThumbnailUrl } from './cloudinary.js';
+import cloudinary from '../config/cloudinary.js';
 
 const getGenAI = () => new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const CANDIDATE_MODELS = [
@@ -235,9 +236,20 @@ export async function analyzeMedia(mediaId) {
     if (media.resourceType === 'video') {
       // For video, get frame URLs
       const frameUrls = getAnalysisUrl(media.cloudinaryId, 'video');
-      imageParts = await Promise.all(
+      const settled = await Promise.allSettled(
         frameUrls.map(url => fetchUrlAsInlinePart(url, 'image/jpeg'))
       );
+      imageParts = settled
+        .filter(s => s.status === 'fulfilled' && s.value)
+        .map(s => s.value);
+
+      // If keyframe extraction returned empty or timed out, fallback to default video poster frame
+      if (imageParts.length === 0) {
+        console.warn(`[Gemini] Keyframe fetch failed for video ${media.cloudinaryId}, falling back to poster frame...`);
+        const fallbackUrl = getThumbnailUrl(media.cloudinaryId, 'video') || cloudinary.url(media.cloudinaryId + '.jpg', { resource_type: 'video', secure: true });
+        const fallbackPart = await fetchUrlAsInlinePart(fallbackUrl, 'image/jpeg');
+        imageParts = [fallbackPart];
+      }
     } else {
       // For images, get optimized URL
       const imageUrl = getAnalysisUrl(media.cloudinaryId, 'image');
